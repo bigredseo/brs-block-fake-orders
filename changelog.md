@@ -1,0 +1,74 @@
+# Changelog
+All notable changes to **BRS Block Fake Orders** will be documented in this file.
+---
+
+## [0.1.3] - 2025-10-13
+### Added
+- **Future-proofed REST API protection:**  
+  Updated detection logic to cover **all WooCommerce REST order endpoints** — not just `/wc/v3/orders`.  
+  The plugin now automatically protects any versioned route matching `/wc/v1/orders`, `/wc/v2/orders`, `/wc/v3/orders`, `/wc/v4/orders`, etc.
+- **Cloudflare-safe origin handling:**  
+  Added a new token-first validation flow that allows requests to bypass missing `Origin`/`Referer` headers when a valid `X-BRS-TOKEN` (nonce) is present.  
+  This prevents false positives when CDNs like **Cloudflare** strip these headers.  
+
+### Changed
+- **Validation order updated:** Token validation now runs **before** origin/referrer checks.  
+  Legitimate checkout requests with a valid token will pass even if the origin or referer is missing.
+- Replaced strict `strpos()` match with a more flexible regex `preg_match( '#/wc/v\d+/orders#', $route )`
+- Updated internal helper script version to match plugin header (0.1.3).
+
+### Filters Added
+- `brs_skip_origin_checks_when_token_valid` — (bool, default true) Skip origin/referrer validation when token passes.
+- `brs_require_origin_or_referer` — (bool, default true when token invalid/not required) Control strictness when no token is provided.
+---
+
+## [0.1.2] - 2025-10-13
+### Fixed
+- Corrected `rest_pre_dispatch` hook parameter order to `($result, $server, $request)` for full WordPress compatibility.  
+- Added strict `instanceof WP_REST_Request` type checks to prevent fatal errors when WooCommerce Analytics or other background REST calls run in admin.  
+- Prevented **500 Internal Server Errors** on the Plugins page and WooCommerce Admin analytics screens.  
+
+### Improved
+- Enhanced compatibility with `rest_do_request()` and WooCommerce background REST preloads.  
+- Verified stability with **WooCommerce 9.9+ (HPOS)** and **WordPress 6.7**.  
+- Maintained all previous security and token-verification logic.
+
+---
+
+## [0.1.1] - 2025-10-13
+### Fixed
+- Removed `WP_REST_Request` type hint that caused fatal errors when the REST class was unavailable during plugin screen rendering.  
+- Added defensive `require_once` calls to ensure REST classes are loaded safely when needed.  
+- Resolved critical error preventing access to the **Plugins** page and activation.
+
+---
+
+## [0.1.0] - 2025-10-13
+### Added
+- **Initial release** of the plugin.  
+- Blocks suspicious WooCommerce order creation attempts across:
+  - **Store API** (`/wc/store/checkout`, `/wc/store/cart`)
+  - **WooCommerce REST v3** (`/wc/v3/orders` POST)
+  - **PayPal Payments AJAX** (`ppc-create-order`, `ppc-approve-order`)
+  - **Classic checkout process**
+
+### Security & Validation
+- Detects and blocks:
+  - Requests missing a **User-Agent**.
+  - Requests missing or mismatched **Origin/Referrer** headers.
+  - Requests with **empty carts** or **invalid totals**.
+  - Known **bot-like user agents** (curl, python, httpclient, nikto, etc.).
+- Optional short-lived **frontend token header** (`X-BRS-TOKEN`, WP nonce) for maximum protection.
+
+### Logging
+- Logs all blocked attempts to `/wp-content/brs-fake-orders.log`.
+
+### Filters
+- `brs_require_frontend_token` – Enable/disable token requirement (default: `true`).  
+- `brs_allow_cross_origin_checkout` – Allow trusted cross-origin flows (default: `false`).  
+- `brs_bad_user_agent_patterns` – Extend/override blocked user agent list.  
+- `brs_block_fake_orders_log` – Hook into block events for monitoring or custom logging.
+
+### Frontend Helper
+- Automatically injects lightweight JS (`brs-checkout-helper.js`) on Cart, Checkout, and Product pages.  
+- Adds `X-BRS-TOKEN` header to all Store API, AJAX, and PayPal requests.

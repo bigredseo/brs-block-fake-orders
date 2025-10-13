@@ -2,7 +2,7 @@
 /*
 Plugin Name: BRS Block Fake Orders
 Description: Blocks suspicious checkout/order creation requests (Store API, WooCommerce REST, and PayPal Payments AJAX) with layered checks + optional required client token header.
-Version: 0.1.2
+Version: 0.1.3
 Author: Big Red SEO (Conor Treacy)
 License: GPLv3
 Text Domain: brs-block-fake-orders
@@ -47,43 +47,55 @@ final class BRS_Block_Fake_Orders {
             return null;
         }
 
-        $ua     = isset($_SERVER['HTTP_USER_AGENT']) ? trim($_SERVER['HTTP_USER_AGENT']) : '';
-        $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : ( isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '' );
-
-        // 1) UA required
-        if ( empty( $ua ) ) {
-            $this->log( 'Blocked: missing UA', $extra + compact('ua','origin') );
-            return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-        }
-
-        // 2) Require origin/referrer
-        if ( empty( $origin ) ) {
-            $this->log( 'Blocked: missing origin/referrer', $extra + compact('ua') );
-            return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-        }
-
-        // 3) Same-host origin unless allowed
-        $site_host   = parse_url( home_url(), PHP_URL_HOST );
-        $origin_host = parse_url( $origin, PHP_URL_HOST );
-        $allow_cross = apply_filters( 'brs_allow_cross_origin_checkout', false, $origin_host, $site_host );
-        if ( $origin_host && strcasecmp( $origin_host, $site_host ) !== 0 && ! $allow_cross ) {
-            $this->log( 'Blocked: origin mismatch', $extra + compact('origin_host','site_host') );
-            return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-        }
-
-        // 4) Require a short-lived frontend token by default
+        // --- CONFIG: filters ---
         $require_token = apply_filters( 'brs_require_frontend_token', true );
+        // If token is valid, skip origin/referrer checks by default (Cloudflare-safe)
+        $skip_origin_when_token_valid = apply_filters( 'brs_skip_origin_checks_when_token_valid', true );
+        // When token is invalid or not required, do we insist on Origin/Referer?
+        $require_origin_or_referer = apply_filters( 'brs_require_origin_or_referer', true );
+
+        // --- TOKEN FIRST ---
+        $token_ok = false;
         if ( $require_token ) {
             $header_token = isset($_SERVER['HTTP_X_BRS_TOKEN']) ? sanitize_text_field($_SERVER['HTTP_X_BRS_TOKEN']) : '';
-            if ( empty( $header_token ) || ! wp_verify_nonce( $header_token, 'brs_checkout_token' ) ) {
+            $token_ok = ( ! empty( $header_token ) && wp_verify_nonce( $header_token, 'brs_checkout_token' ) );
+            if ( ! $token_ok ) {
                 $this->log( 'Blocked: invalid/missing token', $extra + [ 'token_prefix' => substr($header_token, 0, 10) ] );
                 return new WP_Error( 'brs_block', __( 'Request blocked (invalid token).', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
             }
         }
 
-        // 5) Payload sanity: require line items & positive total where possible
+        // --- HEADERS ---
+        $ua     = isset($_SERVER['HTTP_USER_AGENT']) ? trim($_SERVER['HTTP_USER_AGENT']) : '';
+        $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : ( isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '' );
+
+        // 1) UA required (even if token is ok, keep this basic guard)
+        if ( empty( $ua ) ) {
+            $this->log( 'Blocked: missing UA', $extra + compact('ua','origin') );
+            return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
+        }
+
+        // 2) Origin/Referrer checks (only if token is NOT valid, or skipping is disabled)
+        if ( ! $token_ok || ! $skip_origin_when_token_valid ) {
+            if ( $require_origin_or_referer && empty( $origin ) ) {
+                $this->log( 'Blocked: missing origin/referrer', $extra + compact('ua') );
+                return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
+            }
+
+            if ( ! empty( $origin ) ) {
+                $site_host   = parse_url( home_url(), PHP_URL_HOST );
+                $origin_host = parse_url( $origin, PHP_URL_HOST );
+                $allow_cross = apply_filters( 'brs_allow_cross_origin_checkout', false, $origin_host, $site_host );
+                if ( $origin_host && strcasecmp( $origin_host, $site_host ) !== 0 && ! $allow_cross ) {
+                    $this->log( 'Blocked: origin mismatch', $extra + compact('origin_host','site_host') );
+                    return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
+                }
+            }
+        }
+
+        // 3) Payload sanity (only applies to REST requests)
         if ( $request && class_exists('WP_REST_Request') && $request instanceof WP_REST_Request ) {
-            $body = $request->get_body_params();
+            $body  = $request->get_body_params();
             $items = isset( $body['line_items'] ) ? $body['line_items'] : ( isset( $body['cart'] ) ? $body['cart'] : null );
             if ( empty( $items ) ) {
                 $this->log( 'Blocked: empty items', $extra + [ 'keys' => array_keys( (array) $body ) ] );
@@ -96,7 +108,7 @@ final class BRS_Block_Fake_Orders {
             }
         }
 
-        // 6) Simple bad UA patterns
+        // 4) Simple bad UA patterns
         $bad_ua_patterns = apply_filters( 'brs_bad_user_agent_patterns', [ 'curl', 'python-requests', 'php/', 'httpclient', 'nikto', 'fuzzer', 'scanner' ] );
         $lc_ua = strtolower( $ua );
         foreach ( $bad_ua_patterns as $pat ) {
@@ -116,7 +128,7 @@ final class BRS_Block_Fake_Orders {
         }
         $route = method_exists($request, 'get_route') ? $request->get_route() : '';
         $is_store_checkout   = ( is_string($route) && strpos( $route, '/wc/store' ) !== false && ( strpos( $route, '/checkout' ) !== false || strpos( $route, '/cart' ) !== false ) );
-        $is_wc_orders_create = ( is_string($route) && strpos( $route, '/wc/v3/orders' ) !== false && $request->get_method() === 'POST' );
+        $is_wc_orders_create = ( preg_match( '#/wc/v\d+/orders#', $route ) && $request->get_method() === 'POST' );
 
         if ( $is_store_checkout || $is_wc_orders_create ) {
             $blocked = $this->fail_if_suspicious( $request, [ 'route' => $route, 'method' => $request->get_method() ] );
@@ -158,7 +170,7 @@ final class BRS_Block_Fake_Orders {
 
     public function enqueue_helper_js() {
         if ( ! ( is_checkout() || is_cart() || is_product() ) ) return;
-        $ver = '0.1.2';
+        $ver = '0.1.3';
         wp_enqueue_script(
             'brs-checkout-helper',
             plugins_url( 'assets/js/brs-checkout-helper.js', __FILE__ ),
