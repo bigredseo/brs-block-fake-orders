@@ -3,33 +3,47 @@ name: Build release zip
 on:
   push:
     tags:
-      - 'v*'                 # tagging via git push triggers build
+      - 'v*'                 # build when a v* tag is pushed
   release:
-    types: [published]       # publishing a release in the UI triggers build
-  workflow_dispatch:         # manual run button
+    types: [published]       # build when a release is published in the UI
+  workflow_dispatch:         # manual build
+    inputs:
+      tag:
+        description: 'Tag to build (e.g., v0.1.5)'
+        required: true
+        type: string
 
 permissions:
-  contents: write            # required to upload assets to the release
+  contents: write            # needed to upload the asset
 
 jobs:
   build-zip:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout main (we will switch to the tag if provided)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set variables
+      - name: Determine tag/version
         shell: bash
         run: |
-          PLUGIN_SLUG="brs-block-fake-orders"
-          # Determine tag from event
-          TAG="${GITHUB_REF#refs/tags/}"
-          if [ -z "$TAG" ]; then TAG="${{ github.event.release.tag_name }}"; fi
-          echo "PLUGIN_SLUG=$PLUGIN_SLUG" >> $GITHUB_ENV
-          echo "TAG_NAME=$TAG" >> $GITHUB_ENV
-          echo "VERSION=${TAG#v}" >> $GITHUB_ENV
+          TAG_INPUT="${{ inputs.tag }}"
+          if [ -n "$TAG_INPUT" ]; then
+            TAG_NAME="$TAG_INPUT"
+          else
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+            if [ -z "$TAG_NAME" ]; then TAG_NAME="${{ github.event.release.tag_name }}"; fi
+          fi
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          echo "VERSION=${TAG_NAME#v}" >> $GITHUB_ENV
+          echo "PLUGIN_SLUG=brs-block-fake-orders" >> $GITHUB_ENV
+
+      - name: Checkout the specified tag (for manual or release builds)
+        if: env.TAG_NAME != ''
+        run: |
+          git fetch --tags --force
+          git checkout "refs/tags/${TAG_NAME}"
 
       - name: Prepare build directory
         run: |
