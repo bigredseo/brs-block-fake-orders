@@ -3,7 +3,13 @@ name: Build release zip
 on:
   push:
     tags:
-      - 'v*'   # triggers when you push or publish a tag like v0.1.5
+      - 'v*'                 # tagging via git push triggers build
+  release:
+    types: [published]       # publishing a release in the UI triggers build
+  workflow_dispatch:         # manual run button
+
+permissions:
+  contents: write            # required to upload assets to the release
 
 jobs:
   build-zip:
@@ -15,10 +21,15 @@ jobs:
           fetch-depth: 0
 
       - name: Set variables
+        shell: bash
         run: |
-          echo "PLUGIN_SLUG=brs-block-fake-orders" >> $GITHUB_ENV
-          echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+          PLUGIN_SLUG="brs-block-fake-orders"
+          # Determine tag from event
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [ -z "$TAG" ]; then TAG="${{ github.event.release.tag_name }}"; fi
+          echo "PLUGIN_SLUG=$PLUGIN_SLUG" >> $GITHUB_ENV
+          echo "TAG_NAME=$TAG" >> $GITHUB_ENV
+          echo "VERSION=${TAG#v}" >> $GITHUB_ENV
 
       - name: Prepare build directory
         run: |
@@ -26,24 +37,26 @@ jobs:
           rsync -av --delete \
             --exclude '.git*' \
             --exclude '.github' \
-            --exclude 'tests' \
             --exclude 'node_modules' \
+            --exclude 'tests' \
             --exclude '*.zip' \
             ./ build/${PLUGIN_SLUG}/
 
-      - name: Verify plugin version matches tag
+      - name: Verify plugin header version matches tag
         run: |
           grep -E "Version:\s*${VERSION}" -q build/${PLUGIN_SLUG}/${PLUGIN_SLUG}.php \
-          || (echo "Version mismatch: plugin header != tag" && exit 1)
+          || (echo "Version mismatch: plugin header != ${VERSION}" && exit 1)
 
-      - name: Create zip (constant top-level folder)
+      - name: Create zip with constant top-level folder
         run: |
           cd build
           zip -r ${PLUGIN_SLUG}-v${VERSION}.zip ${PLUGIN_SLUG}
+          ls -l
 
       - name: Upload zip to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: build/${{ env.PLUGIN_SLUG }}-v${{ env.VERSION }}.zip
+          tag_name: ${{ env.TAG_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
