@@ -1,0 +1,49 @@
+name: Build release zip
+
+on:
+  push:
+    tags:
+      - 'v*'   # triggers when you push or publish a tag like v0.1.5
+
+jobs:
+  build-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set variables
+        run: |
+          echo "PLUGIN_SLUG=brs-block-fake-orders" >> $GITHUB_ENV
+          echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_ENV
+
+      - name: Prepare build directory
+        run: |
+          mkdir -p build/${PLUGIN_SLUG}
+          rsync -av --delete \
+            --exclude '.git*' \
+            --exclude '.github' \
+            --exclude 'tests' \
+            --exclude 'node_modules' \
+            --exclude '*.zip' \
+            ./ build/${PLUGIN_SLUG}/
+
+      - name: Verify plugin version matches tag
+        run: |
+          grep -E "Version:\s*${VERSION}" -q build/${PLUGIN_SLUG}/${PLUGIN_SLUG}.php \
+          || (echo "Version mismatch: plugin header != tag" && exit 1)
+
+      - name: Create zip (constant top-level folder)
+        run: |
+          cd build
+          zip -r ${PLUGIN_SLUG}-v${VERSION}.zip ${PLUGIN_SLUG}
+
+      - name: Upload zip to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/${{ env.PLUGIN_SLUG }}-v${{ env.VERSION }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
