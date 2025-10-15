@@ -2,7 +2,7 @@
 /*
 Plugin Name: BRS Block Fake Orders
 Description: Blocks suspicious checkout/order creation requests (Store API, WC REST, PayPal AJAX) with layered checks + optional required client token header.
-Version: 0.1.5
+Version: 0.1.5.2
 Author: Big Red SEO (Conor Treacy)
 License: GPLv3
 Text Domain: brs-block-fake-orders

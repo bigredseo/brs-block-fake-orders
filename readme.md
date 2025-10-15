@@ -1,6 +1,6 @@
 # BRS Block Fake Orders
 
-**Version:** 0.1.5  
+**Version:** 0.1.5.2 
 **Author:** Big Red SEO  
 **Requires WordPress:** 6.3+  
 **Tested up to:** 6.7  
