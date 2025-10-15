@@ -2,6 +2,25 @@
 All notable changes to **BRS Block Fake Orders** will be documented in this file.
 ---
 
+## [0.1.5] - 2025-10-15
+### Changed
+- Major internal refactor: split plugin logic into modular include files for maintainability and clarity.
+  - Core classes separated for install, logging, validation, integrations, and admin functionality.
+  - Main plugin file now acts as a clean bootstrap/loader only.
+
+### Added
+- New **opt-in uninstall cleanup**:
+  - Added `uninstall.php` to safely remove data when enabled.
+  - New **Settings** page under WooCommerce → BRS Fake Orders Settings with a checkbox to delete data on uninstall.
+- Added `BRS_BFO_Settings` class to manage admin options.
+- Light autoloader implemented for `includes/` classes.
+
+### Notes
+- No functional behavior changes for checkout validation or logging.
+- Existing files `assets/js/brs-checkout-helper.js` and `includes/admin/log-viewer.php` remain untouched.
+
+---
+
 ## [0.1.4] - 2025-10-14
 ### Added
 - **Admin Log Viewer (WooCommerce → Fake Order Log):** View, search, filter, paginate, clear, and export logs to CSV directly in wp-admin.

@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: BRS Block Fake Orders
-Description: Blocks suspicious checkout/order creation requests (Store API, WooCommerce REST, and PayPal Payments AJAX) with layered checks + optional required client token header.
-Version: 0.1.4
+Description: Blocks suspicious checkout/order creation requests (Store API, WC REST, PayPal AJAX) with layered checks + optional required client token header.
+Version: 0.1.5
 Author: Big Red SEO (Conor Treacy)
 License: GPLv3
 Text Domain: brs-block-fake-orders
@@ -10,250 +10,61 @@ Text Domain: brs-block-fake-orders
 
 defined('ABSPATH') || exit;
 
-if ( ! class_exists('BRS_Block_Fake_Orders') ) :
+/**
+ * Basic constants and paths.
+ * (Kept minimal here; additional helpers live in includes/common/helpers.php)
+ */
+if ( ! defined('BRS_BFO_FILE') ) define('BRS_BFO_FILE', __FILE__);
+if ( ! defined('BRS_BFO_DIR') )  define('BRS_BFO_DIR', plugin_dir_path(__FILE__));
+if ( ! defined('BRS_BFO_URL') )  define('BRS_BFO_URL', plugin_dir_url(__FILE__));
 
-register_activation_hook( __FILE__, function () {
-    global $wpdb;
-    $table = $wpdb->prefix . 'brs_fo_log';
-    $charset_collate = $wpdb->get_charset_collate();
+/** PSR-4-ish very light autoloader for our classes. */
+spl_autoload_register(function($class){
+    // Only load our plugin classes
+    if (strpos($class, 'BRS_BFO_') !== 0) return;
 
-    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-    $sql = "CREATE TABLE {$table} (
-        id BIGINT(20) unsigned NOT NULL AUTO_INCREMENT,
-        created_at DATETIME NOT NULL,
-        level VARCHAR(20) NOT NULL DEFAULT 'info',
-        msg TEXT NOT NULL,
-        context LONGTEXT NULL,
-        route VARCHAR(255) NULL,
-        ip VARCHAR(64) NULL,
-        ua TEXT NULL,
-        PRIMARY KEY  (id),
-        KEY created_at (created_at),
-        KEY level (level),
-        KEY route (route)
-    ) $charset_collate;";
-    dbDelta($sql);
+    $map = [
+        'BRS_BFO_Install'         => 'includes/common/class-brs-bfo-install.php',
+        'BRS_BFO_Logger'          => 'includes/common/class-brs-bfo-logger.php',
+        'BRS_BFO_Validator'       => 'includes/core/class-brs-bfo-validator.php',
+        'BRS_BFO_Assets'          => 'includes/core/class-brs-bfo-assets.php',
+        'BRS_BFO_Rest_Hooks'      => 'includes/integrations/class-brs-bfo-rest-hooks.php',
+        'BRS_BFO_PayPal_Hooks'    => 'includes/integrations/class-brs-bfo-paypal-hooks.php',
+        'BRS_BFO_Classic_Checkout'=> 'includes/integrations/class-brs-bfo-classic-checkout.php',
+        'BRS_BFO_Settings'        => 'includes/admin/class-brs-bfo-settings.php',
+        'BRS_BFO_Admin_Menu'      => 'includes/admin/class-brs-bfo-admin-menu.php',
+    ];
+
+    if (isset($map[$class])) {
+        require_once BRS_BFO_DIR . $map[$class];
+    }
 });
 
+// Small helpers (constants, filters, tiny utils)
+require_once BRS_BFO_DIR . 'includes/common/helpers.php';
 
-final class BRS_Block_Fake_Orders {
-    private $log_file;
+/** Activation: create/upgrade DB table (moved from main file). */
+register_activation_hook(BRS_BFO_FILE, function(){
+    (new BRS_BFO_Install())->run();
+});
 
-    public function __construct() {
-        $this->log_file = trailingslashit( WP_CONTENT_DIR ) . 'brs-fake-orders.log';
+/** Bootstrap instances and register hooks. */
+add_action('plugins_loaded', function(){
+    // Core services
+    $logger    = new BRS_BFO_Logger();      // wraps DB + optional file
+    $validator = new BRS_BFO_Validator($logger);
 
-        // REST interception (Store API and Woo REST v3 Orders POST)
-        add_filter( 'rest_pre_dispatch', [ $this, 'maybe_block_rest_request' ], 10, 3 );
+    // Frontend assets
+    (new BRS_BFO_Assets())->register();
 
-        // PayPal Payments AJAX routes (WooCommerce PayPal Payments)
-        add_action( 'wp_ajax_nopriv_ppc-create-order', [ $this, 'block_ajax_paypal' ] );
-        add_action( 'wp_ajax_ppc-create-order', [ $this, 'block_ajax_paypal' ] );
-        add_action( 'wp_ajax_nopriv_ppc-approve-order', [ $this, 'block_ajax_paypal' ] );
-        add_action( 'wp_ajax_ppc-approve-order', [ $this, 'block_ajax_paypal' ] );
+    // Integrations
+    (new BRS_BFO_Rest_Hooks($validator, $logger))->register();
+    (new BRS_BFO_PayPal_Hooks($validator, $logger))->register();
+    (new BRS_BFO_Classic_Checkout($validator, $logger))->register();
 
-        // Classic checkout fallback
-        add_action( 'woocommerce_checkout_process', [ $this, 'maybe_block_classic_checkout' ] );
+    // Admin
+    (new BRS_BFO_Admin_Menu())->register();
 
-        // Frontend helper to inject token
-        add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_helper_js' ] );
-    }
-
-    private function log( $msg, $context = [], $level = 'info' ) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'brs_fo_log';
-
-        // Enrich context automatically
-        $enriched = array_merge( (array) $context, [
-            'server' => [
-                'method' => $_SERVER['REQUEST_METHOD'] ?? '',
-                'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
-            ],
-        ]);
-
-        $wpdb->insert(
-            $table,
-            [
-                'created_at' => current_time('mysql', 1), // GMT
-                'level'      => sanitize_text_field($level),
-                'msg'        => wp_strip_all_tags( (string) $msg ),
-                'context'    => wp_json_encode( $enriched ),
-                'route'      => isset($context['route']) ? substr( (string) $context['route'], 0, 255 ) : null,
-                'ip'         => isset($_SERVER['REMOTE_ADDR']) ? substr( (string) $_SERVER['REMOTE_ADDR'], 0, 64 ) : null,
-                'ua'         => isset($_SERVER['HTTP_USER_AGENT']) ? (string) $_SERVER['HTTP_USER_AGENT'] : null,
-            ],
-            [ '%s','%s','%s','%s','%s','%s','%s' ]
-        );
-
-        /**
-         * Still fire the action for external listeners.
-         */
-        do_action( 'brs_block_fake_orders_log', $msg, $context );
-    }
-
-    private function fail_if_suspicious( $request = null, $extra = [] ) {
-        // Allow admin-cap users
-        if ( is_user_logged_in() && current_user_can( 'manage_options' ) ) {
-            return null;
-        }
-
-        // --- CONFIG: filters ---
-        $require_token = apply_filters( 'brs_require_frontend_token', true );
-        // If token is valid, skip origin/referrer checks by default (Cloudflare-safe)
-        $skip_origin_when_token_valid = apply_filters( 'brs_skip_origin_checks_when_token_valid', true );
-        // When token is invalid or not required, do we insist on Origin/Referer?
-        $require_origin_or_referer = apply_filters( 'brs_require_origin_or_referer', true );
-
-        // --- TOKEN FIRST ---
-        $token_ok = false;
-        if ( $require_token ) {
-            $header_token = isset($_SERVER['HTTP_X_BRS_TOKEN']) ? sanitize_text_field($_SERVER['HTTP_X_BRS_TOKEN']) : '';
-            $token_ok = ( ! empty( $header_token ) && wp_verify_nonce( $header_token, 'brs_checkout_token' ) );
-            if ( ! $token_ok ) {
-                $this->log( 'Blocked: invalid/missing token', $extra + [ 'token_prefix' => substr($header_token, 0, 10) ] );
-                return new WP_Error( 'brs_block', __( 'Request blocked (invalid token).', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-            }
-        }
-
-        // --- HEADERS ---
-        $ua     = isset($_SERVER['HTTP_USER_AGENT']) ? trim($_SERVER['HTTP_USER_AGENT']) : '';
-        $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : ( isset($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : '' );
-
-        // 1) UA required (even if token is ok, keep this basic guard)
-        if ( empty( $ua ) ) {
-            $this->log( 'Blocked: missing UA', $extra + compact('ua','origin') );
-            return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-        }
-
-        // 2) Origin/Referrer checks (only if token is NOT valid, or skipping is disabled)
-        if ( ! $token_ok || ! $skip_origin_when_token_valid ) {
-            if ( $require_origin_or_referer && empty( $origin ) ) {
-                $this->log( 'Blocked: missing origin/referrer', $extra + compact('ua') );
-                return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-            }
-
-            if ( ! empty( $origin ) ) {
-                $site_host   = parse_url( home_url(), PHP_URL_HOST );
-                $origin_host = parse_url( $origin, PHP_URL_HOST );
-                $allow_cross = apply_filters( 'brs_allow_cross_origin_checkout', false, $origin_host, $site_host );
-                if ( $origin_host && strcasecmp( $origin_host, $site_host ) !== 0 && ! $allow_cross ) {
-                    $this->log( 'Blocked: origin mismatch', $extra + compact('origin_host','site_host') );
-                    return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-                }
-            }
-        }
-
-        // 3) Payload sanity (only applies to REST requests)
-        if ( $request && class_exists('WP_REST_Request') && $request instanceof WP_REST_Request ) {
-            $body  = $request->get_body_params();
-            $items = isset( $body['line_items'] ) ? $body['line_items'] : ( isset( $body['cart'] ) ? $body['cart'] : null );
-            if ( empty( $items ) ) {
-                $this->log( 'Blocked: empty items', $extra + [ 'keys' => array_keys( (array) $body ) ] );
-                return new WP_Error( 'brs_block', __( 'Request blocked (empty cart).', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-            }
-            $total = isset( $body['total'] ) ? floatval( $body['total'] ) : 0;
-            if ( $total <= 0 ) {
-                $this->log( 'Blocked: invalid total', $extra + [ 'total' => $total ] );
-                return new WP_Error( 'brs_block', __( 'Request blocked (invalid total).', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-            }
-        }
-
-        // 4) Simple bad UA patterns
-        $bad_ua_patterns = apply_filters( 'brs_bad_user_agent_patterns', [ 'curl', 'python-requests', 'php/', 'httpclient', 'nikto', 'fuzzer', 'scanner' ] );
-        $lc_ua = strtolower( $ua );
-        foreach ( $bad_ua_patterns as $pat ) {
-            if ( strpos( $lc_ua, $pat ) !== false ) {
-                $this->log( 'Blocked: bad UA pattern', $extra + compact('ua') );
-                return new WP_Error( 'brs_block', __( 'Request blocked.', 'brs-block-fake-orders' ), [ 'status' => 403 ] );
-            }
-        }
-
-        return null; // allow
-    }
-
-    public function maybe_block_rest_request( $result, $server, $request ) {
-        // Ensure proper types; WordPress calls with ($result, WP_REST_Server $server, WP_REST_Request $request)
-        if ( ! ( isset($request) && class_exists('WP_REST_Request') && ( $request instanceof WP_REST_Request ) ) ) {
-            return $result;
-        }
-        $route = method_exists($request, 'get_route') ? $request->get_route() : '';
-        $is_store_checkout   = ( is_string($route) && strpos( $route, '/wc/store' ) !== false && ( strpos( $route, '/checkout' ) !== false || strpos( $route, '/cart' ) !== false ) );
-        $is_wc_orders_create = ( preg_match( '#/wc/v\d+/orders#', $route ) && $request->get_method() === 'POST' );
-
-        if ( $is_store_checkout || $is_wc_orders_create ) {
-            $blocked = $this->fail_if_suspicious( $request, [ 'route' => $route, 'method' => $request->get_method() ] );
-            if ( is_wp_error( $blocked ) ) {
-                return rest_ensure_response( $blocked );
-            }
-        }
-        return $result;
-    }
-
-    public function block_ajax_paypal() {
-        // Defensive: ensure WP_REST_Request is loadable
-        if ( ! class_exists('WP_REST_Request') ) { @require_once ABSPATH . 'wp-includes/rest-api/class-wp-rest-request.php'; }
-        $request = class_exists('WP_REST_Request') ? new WP_REST_Request( $_SERVER['REQUEST_METHOD'] ) : null;
-        if ( $request ) {
-            foreach ( $_REQUEST as $k => $v ) {
-                $request->set_param( $k, $v );
-            }
-        }
-        $blocked = $this->fail_if_suspicious( $request, [ 'ajax' => current_action() ] );
-        if ( is_wp_error( $blocked ) ) {
-            wp_send_json_error( [ 'message' => $blocked->get_error_message() ], 403 );
-        }
-        // otherwise let PayPal plugin continue
-    }
-
-    public function maybe_block_classic_checkout() {
-        // Defensive: ensure WP_REST_Request is loadable
-        if ( ! class_exists('WP_REST_Request') ) { @require_once ABSPATH . 'wp-includes/rest-api/class-wp-rest-request.php'; }
-        $req = class_exists('WP_REST_Request') ? new WP_REST_Request( 'POST' ) : null;
-        if ( $req ) {
-            $req->set_body_params( $_POST );
-        }
-        $blocked = $this->fail_if_suspicious( $req, [ 'hook' => 'woocommerce_checkout_process' ] );
-        if ( is_wp_error( $blocked ) ) {
-            wc_add_notice( $blocked->get_error_message(), 'error' );
-        }
-    }
-
-    public function enqueue_helper_js() {
-        if ( ! ( is_checkout() || is_cart() || is_product() ) ) return;
-        $ver = '0.1.3';
-        wp_enqueue_script(
-            'brs-checkout-helper',
-            plugins_url( 'assets/js/brs-checkout-helper.js', __FILE__ ),
-            array(),
-            $ver,
-            true
-        );
-        wp_localize_script( 'brs-checkout-helper', 'BRSCheckout', array(
-            'token' => wp_create_nonce( 'brs_checkout_token' ),
-        ) );
-    }
-}
-
-// Bootstrap
-add_action( 'plugins_loaded', function () {
-    if ( class_exists( 'WooCommerce' ) ) {
-        new BRS_Block_Fake_Orders();
-    }
-} );
-
-endif; // class guard
-
-// Admin page entry under WooCommerce
-add_action('admin_menu', function () {
-    add_submenu_page(
-        'woocommerce',
-        'Fake Order Log',
-        'Fake Order Log',
-        'manage_woocommerce', // or 'manage_options'
-        'brs-fake-orders-log',
-        function () {
-            // Require the viewer file
-            require_once __DIR__ . '/includes/admin/log-viewer.php';
-            brs_bfo_render_log_page();
-        }
-    );
+    // Admin Settings (includes uninstall option)
+    (new BRS_BFO_Settings())->register();
 });
