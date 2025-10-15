@@ -2,6 +2,27 @@
 All notable changes to **BRS Block Fake Orders** will be documented in this file.
 ---
 
+## [0.1.4] - 2025-10-14
+### Added
+- **Admin Log Viewer (WooCommerce → Fake Order Log):** View, search, filter, paginate, clear, and export logs to CSV directly in wp-admin.
+- **Database-backed logging:** Introduced custom table `wp_brs_fo_log` (created on activation) to store log entries with fields:
+  `id, created_at, level, msg, context (JSON), route, ip, ua`.
+- **Security & permissions:** Admin screen gated by `manage_woocommerce` (fallback `manage_options`). All actions protected with nonces.
+- **Quality-of-life:** 
+  - Filters for **level**, **route**, and a general **search** across message/context/UA.
+  - **Pagination** controls and **CSV export** of all entries.
+  - **Clear Log** button to truncate the table.
+
+### Changed
+- **Logging pipeline:** Replaced file-based logging (`/wp-content/brs-fake-orders.log`) with database inserts via a new `log()` implementation.
+- **Internal structure:** Added `/includes/admin/log-viewer.php` and submenu registration to load the admin UI.
+
+### Notes
+- Existing `.log` file is no longer used.
+- Table includes indexes on `created_at`, `level`, and `route` for snappy admin queries.
+
+---
+
 ## [0.1.3] - 2025-10-13
 ### Added
 - **Future-proofed REST API protection:**  
@@ -20,6 +41,7 @@ All notable changes to **BRS Block Fake Orders** will be documented in this file
 ### Filters Added
 - `brs_skip_origin_checks_when_token_valid` — (bool, default true) Skip origin/referrer validation when token passes.
 - `brs_require_origin_or_referer` — (bool, default true when token invalid/not required) Control strictness when no token is provided.
+
 ---
 
 ## [0.1.2] - 2025-10-13

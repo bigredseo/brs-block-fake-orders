@@ -2,7 +2,7 @@
 /*
 Plugin Name: BRS Block Fake Orders
 Description: Blocks suspicious checkout/order creation requests (Store API, WooCommerce REST, and PayPal Payments AJAX) with layered checks + optional required client token header.
-Version: 0.1.3
+Version: 0.1.4
 Author: Big Red SEO (Conor Treacy)
 License: GPLv3
 Text Domain: brs-block-fake-orders
@@ -11,6 +11,30 @@ Text Domain: brs-block-fake-orders
 defined('ABSPATH') || exit;
 
 if ( ! class_exists('BRS_Block_Fake_Orders') ) :
+
+register_activation_hook( __FILE__, function () {
+    global $wpdb;
+    $table = $wpdb->prefix . 'brs_fo_log';
+    $charset_collate = $wpdb->get_charset_collate();
+
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    $sql = "CREATE TABLE {$table} (
+        id BIGINT(20) unsigned NOT NULL AUTO_INCREMENT,
+        created_at DATETIME NOT NULL,
+        level VARCHAR(20) NOT NULL DEFAULT 'info',
+        msg TEXT NOT NULL,
+        context LONGTEXT NULL,
+        route VARCHAR(255) NULL,
+        ip VARCHAR(64) NULL,
+        ua TEXT NULL,
+        PRIMARY KEY  (id),
+        KEY created_at (created_at),
+        KEY level (level),
+        KEY route (route)
+    ) $charset_collate;";
+    dbDelta($sql);
+});
+
 
 final class BRS_Block_Fake_Orders {
     private $log_file;
@@ -34,10 +58,35 @@ final class BRS_Block_Fake_Orders {
         add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_helper_js' ] );
     }
 
-    private function log( $msg, $context = [] ) {
-        $time = date( 'Y-m-d H:i:s' );
-        $entry = sprintf( "[%s] %s %s\n", $time, $msg, ! empty( $context ) ? wp_json_encode( $context ) : '' );
-        error_log( $entry, 3, $this->log_file );
+    private function log( $msg, $context = [], $level = 'info' ) {
+        global $wpdb;
+        $table = $wpdb->prefix . 'brs_fo_log';
+
+        // Enrich context automatically
+        $enriched = array_merge( (array) $context, [
+            'server' => [
+                'method' => $_SERVER['REQUEST_METHOD'] ?? '',
+                'request_uri' => $_SERVER['REQUEST_URI'] ?? '',
+            ],
+        ]);
+
+        $wpdb->insert(
+            $table,
+            [
+                'created_at' => current_time('mysql', 1), // GMT
+                'level'      => sanitize_text_field($level),
+                'msg'        => wp_strip_all_tags( (string) $msg ),
+                'context'    => wp_json_encode( $enriched ),
+                'route'      => isset($context['route']) ? substr( (string) $context['route'], 0, 255 ) : null,
+                'ip'         => isset($_SERVER['REMOTE_ADDR']) ? substr( (string) $_SERVER['REMOTE_ADDR'], 0, 64 ) : null,
+                'ua'         => isset($_SERVER['HTTP_USER_AGENT']) ? (string) $_SERVER['HTTP_USER_AGENT'] : null,
+            ],
+            [ '%s','%s','%s','%s','%s','%s','%s' ]
+        );
+
+        /**
+         * Still fire the action for external listeners.
+         */
         do_action( 'brs_block_fake_orders_log', $msg, $context );
     }
 
@@ -192,3 +241,19 @@ add_action( 'plugins_loaded', function () {
 } );
 
 endif; // class guard
+
+// Admin page entry under WooCommerce
+add_action('admin_menu', function () {
+    add_submenu_page(
+        'woocommerce',
+        'Fake Order Log',
+        'Fake Order Log',
+        'manage_woocommerce', // or 'manage_options'
+        'brs-fake-orders-log',
+        function () {
+            // Require the viewer file
+            require_once __DIR__ . '/includes/admin/log-viewer.php';
+            brs_bfo_render_log_page();
+        }
+    );
+});
