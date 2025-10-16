@@ -1,24 +1,38 @@
 <?php
 /*
-Plugin Name: BRS Block Fake Orders
-Description: Blocks suspicious checkout/order creation requests (Store API, WC REST, PayPal AJAX) with layered checks + optional required client token header.
-Version: 0.1.5.3
-Author: Big Red SEO (Conor Treacy)
-License: GPLv3
-Text Domain: brs-block-fake-orders
+Plugin Name:       BRS Block Fake Orders
+Plugin URI:        https://github.com/bigredseo/brs-block-fake-orders
+Description:       Blocks suspicious checkout/order creation requests (Store API, WC REST, PayPal AJAX) with layered checks + optional required client token header.
+Version:           0.1.6
+Requires at least: 5.8
+Requires PHP:      7.4
+Author:            Big Red SEO
+Author URI:        https://www.bigredseo.com/
+License:           GPL-2.0-or-later
+License URI:       https://www.gnu.org/licenses/gpl-2.0.html
+Text Domain:       brs-block-fake-orders
+Domain Path:       /languages
+Requires Plugins:  woocommerce
 */
 
 defined('ABSPATH') || exit;
 
-/**
- * Basic constants and paths.
- * (Kept minimal here; additional helpers live in includes/common/helpers.php)
- */
+// Basic constants and paths.
 if ( ! defined('BRS_BFO_FILE') ) define('BRS_BFO_FILE', __FILE__);
 if ( ! defined('BRS_BFO_DIR') )  define('BRS_BFO_DIR', plugin_dir_path(__FILE__));
 if ( ! defined('BRS_BFO_URL') )  define('BRS_BFO_URL', plugin_dir_url(__FILE__));
 
-/** PSR-4-ish very light autoloader for our classes. */
+// Fully-prefixed log table name.
+if ( ! function_exists('brs_bfo_log_table') ) {
+    function brs_bfo_log_table() {
+        global $wpdb;
+        return $wpdb->prefix . 'brs_fo_log';
+    }
+}
+
+/** Minimal classmap autoloader for our BRS_BFO_* plugin classes.
+ *  Not PSR-4; update the $map below when adding classes.
+ */
 spl_autoload_register(function($class){
     // Only load our plugin classes
     if (strpos($class, 'BRS_BFO_') !== 0) return;
@@ -40,15 +54,12 @@ spl_autoload_register(function($class){
     }
 });
 
-// Small helpers (constants, filters, tiny utils)
-require_once BRS_BFO_DIR . 'includes/common/helpers.php';
-
-/** Activation: create/upgrade DB table (moved from main file). */
+// Activation: create/upgrade DB table
 register_activation_hook(BRS_BFO_FILE, function(){
     (new BRS_BFO_Install())->run();
 });
 
-/** Bootstrap instances and register hooks. */
+// Bootstrap instances and register hooks.
 add_action('plugins_loaded', function(){
     // Core services
     $logger    = new BRS_BFO_Logger();      // wraps DB + optional file

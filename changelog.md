@@ -2,6 +2,18 @@
 All notable changes to **BRS Block Fake Orders** will be documented in this file.
 ---
 
+## [0.1.6] - 2025-10-16
+### Changed
+- Merged `brs_bfo_log_table()` into the main plugin file so it’s available earlier (e.g., during install/logging).
+- Reworded autoloader comment to: `Minimal classmap autoloader (not PSR-4)` for accuracy.
+- Stopped defining any separate runtime version value; the plugin header remains the single source of truth.
+- Updated license.txt with GPL v2 compliance information and removed v3 details.
+
+### Removed
+- Deleted `includes/common/helpers.php` and the corresponding `require_once` in the main file.
+
+---
+
 ## [0.1.5] - 2025-10-15
 ### Changed
 - Major internal refactor: split plugin logic into modular include files for maintainability and clarity.

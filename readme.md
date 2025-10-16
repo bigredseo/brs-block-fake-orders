@@ -1,6 +1,6 @@
 # BRS Block Fake Orders
 
-**Version:** 0.1.5.3
+**Version:** 0.1.6  
 **Author:** Big Red SEO  
 **Requires WordPress:** 6.3+  
 **Tested up to:** 6.7  
@@ -30,13 +30,13 @@ It adds layered validation to these systems:
 
 Each request is evaluated in order:
 
-### 1️⃣ Token Validation (first)
+### Token Validation (first)
 If `brs_require_frontend_token` is `true` (default), a valid **`X-BRS-TOKEN`** header (WordPress nonce) must be present.
 
 - If the token is valid, origin/referrer checks are skipped (default).
 - If the token is missing or invalid, the request is blocked immediately.
 
-### 2️⃣ Origin / Referrer Checks  
+### Origin / Referrer Checks  
 Used only when the token is missing or invalid.
 
 - Missing **Origin/Referer**, or  
@@ -45,13 +45,13 @@ Used only when the token is missing or invalid.
 
 > **Cloudflare note:** Legitimate Store API requests still pass even if Cloudflare strips `Origin/Referer`, because the token validates first.
 
-### 3️⃣ Payload Sanity
+### Payload Sanity
 For checkout and order routes:
 - Missing `line_items` or `cart`
 - `total` less than or equal to `0`  
 → Request is blocked.
 
-### 4️⃣ User-Agent Checks
+### User-Agent Checks
 Blocks requests with:
 - Empty or missing `User-Agent`
 - Known bad UA patterns:
