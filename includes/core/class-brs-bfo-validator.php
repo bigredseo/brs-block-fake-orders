@@ -21,21 +21,46 @@ class BRS_BFO_Validator {
         $skip_origin_when_token_valid = apply_filters('brs_skip_origin_checks_when_token_valid', true);
         $require_origin_or_referer = apply_filters('brs_require_origin_or_referer', true);
 
-        // Token first
-        $token_ok = false;
-        if ($require_token) {
+        // Headers
+        $ua = isset($_SERVER['HTTP_USER_AGENT']) ? trim($_SERVER['HTTP_USER_AGENT']) : '';
+        $origin  = isset($_SERVER['HTTP_ORIGIN']) ? trim($_SERVER['HTTP_ORIGIN']) : '';
+        $referer = isset($_SERVER['HTTP_REFERER']) ? trim($_SERVER['HTTP_REFERER']) : '';
+
+        // Begin validation toggle logic
+        $allowed_domain = get_option('brs_bfo_allowed_domain', parse_url(get_site_url(), PHP_URL_HOST));
+
+        // Token validation
+        if (get_option('brs_bfo_check_token', true)) {
             $header_token = isset($_SERVER['HTTP_X_BRS_TOKEN']) ? sanitize_text_field($_SERVER['HTTP_X_BRS_TOKEN']) : '';
-            $token_ok = (!empty($header_token) && wp_verify_nonce($header_token, 'brs_checkout_token'));
-            if (!$token_ok) {
+            if (empty($header_token) || !wp_verify_nonce($header_token, 'brs_checkout_token')) {
                 $this->logger->log('Blocked: invalid/missing token', $extra + ['token_prefix' => substr($header_token, 0, 10)]);
                 return new WP_Error('brs_block', __('Request blocked. (Invalid token).', 'brs-block-fake-orders'), ['status' => 403]);
             }
         }
 
-        // Headers
-        $ua = isset($_SERVER['HTTP_USER_AGENT']) ? trim($_SERVER['HTTP_USER_AGENT']) : '';
-        $origin  = isset($_SERVER['HTTP_ORIGIN']) ? trim($_SERVER['HTTP_ORIGIN']) : '';
-        $referer = isset($_SERVER['HTTP_REFERER']) ? trim($_SERVER['HTTP_REFERER']) : '';
+        // Origin validation
+        if (get_option('brs_bfo_check_origin', true) && !empty($origin)) {
+            if (parse_url($origin, PHP_URL_HOST) !== $allowed_domain) {
+                $this->logger->log('Blocked: invalid Origin', $extra + compact('origin'));
+                return new WP_Error('brs_block', __('Invalid request origin.', 'brs-block-fake-orders'), ['status' => 403]);
+            }
+        }
+
+        // Referer validation
+        if (get_option('brs_bfo_check_referer', true) && !empty($referer)) {
+            if (parse_url($referer, PHP_URL_HOST) !== $allowed_domain) {
+                $this->logger->log('Blocked: invalid Referer', $extra + compact('referer'));
+                return new WP_Error('brs_block', __('Invalid request referer.', 'brs-block-fake-orders'), ['status' => 403]);
+            }
+        }
+
+        // Session validation
+        if (get_option('brs_bfo_check_session', true)) {
+            if (!isset($_COOKIE['woocommerce_cart_hash'])) {
+                $this->logger->log('Blocked: missing WooCommerce session cookie');
+                return new WP_Error('brs_block', __('Session missing or expired.', 'brs-block-fake-orders'), ['status' => 403]);
+            }
+        }        
 
         // Origin/Referer checks (skippable if token OK)
         if ($require_origin_or_referer && ! ($skip_origin_when_token_valid && $token_ok)) {

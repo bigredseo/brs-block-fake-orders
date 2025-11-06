@@ -2,6 +2,18 @@
 All notable changes to **BRS Block Fake Orders** will be documented in this file.
 ---
 
+## [0.1.7] - 2025-11-05
+### Added
+- New **Validation Settings** section in the admin panel with toggles for token, origin, referer, and session checks.
+- Added configurable allowed domain (defaults to the site URL).
+- Integrated toggle-based validation into `BRS_BFO_Validator` and REST API hooks.
+
+### Changed
+- REST API requests to `/wc/v*` now respect configured validation rules.
+- Removed redundant token check from `BRS_BFO_Validator`.
+
+---
+
 ## [0.1.6] - 2025-10-16
 ### Changed
 - Merged `brs_bfo_log_table()` into the main plugin file so it’s available earlier (e.g., during install/logging).

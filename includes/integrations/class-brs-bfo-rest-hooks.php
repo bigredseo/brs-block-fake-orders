@@ -19,6 +19,44 @@ class BRS_BFO_Rest_Hooks {
             return $result;
         }
         $route = method_exists($request, 'get_route') ? $request->get_route() : '';
+
+        // --- New protection for WooCommerce REST endpoints ---
+        if (strpos($route, '/wc/v') === 0) {
+            // Allow admins
+            if (is_user_logged_in() && current_user_can('manage_options')) {
+                return $result;
+            }
+
+            $allowed_domain = get_option('brs_bfo_allowed_domain', parse_url(get_site_url(), PHP_URL_HOST));
+
+            // Session validation
+            if (get_option('brs_bfo_check_session', true) && !isset($_COOKIE['woocommerce_cart_hash'])) {
+                return new WP_Error('brs_block', __('Session required for checkout.', 'brs-block-fake-orders'), ['status' => 403]);
+            }
+
+            // Origin validation
+            if (get_option('brs_bfo_check_origin', true) && isset($_SERVER['HTTP_ORIGIN'])) {
+                $origin = parse_url($_SERVER['HTTP_ORIGIN'], PHP_URL_HOST);
+                if ($origin !== $allowed_domain) {
+                    return new WP_Error('brs_block', __('Invalid Origin.', 'brs-block-fake-orders'), ['status' => 403]);
+                }
+            }
+
+            // Referer validation
+            if (get_option('brs_bfo_check_referer', true) && isset($_SERVER['HTTP_REFERER'])) {
+                $referer = parse_url($_SERVER['HTTP_REFERER'], PHP_URL_HOST);
+                if ($referer !== $allowed_domain) {
+                    return new WP_Error('brs_block', __('Invalid Referer.', 'brs-block-fake-orders'), ['status' => 403]);
+                }
+            }
+
+            // Optional: basic browser UA check
+            $ua = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+            if (!preg_match('/Mozilla|Chrome|Safari|Edge/i', $ua)) {
+                return new WP_Error('brs_block', __('Non-browser client blocked.', 'brs-block-fake-orders'), ['status' => 403]);
+            }
+        }
+                
         $is_store_checkout   = ( is_string($route) && (strpos($route, '/store/checkout') !== false || strpos($route, '/cart') !== false) );
         $is_wc_orders_create = ( preg_match('#/wc/v\d+/orders#', $route) && $request->get_method() === 'POST' );
 

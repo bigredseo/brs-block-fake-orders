@@ -42,7 +42,80 @@ class BRS_BFO_Settings {
             'brs_bfo_settings',
             'brs_bfo_cleanup'
         );
+
+        // --- Validation Settings Section ---
+        add_settings_section(
+            'brs_bfo_section_validation',
+            __('Validation Settings', 'brs-block-fake-orders'),
+            '__return_false',
+            'brs_bfo_settings'
+        );
+
+        // Register toggles
+        add_settings_field(
+            'brs_bfo_check_token',
+            __('Enable Token Validation', 'brs-block-fake-orders'),
+            [$this, 'render_checkbox_field'],
+            'brs_bfo_settings',
+            'brs_bfo_section_validation',
+            ['option_name' => 'brs_bfo_check_token']
+        );
+        register_setting('brs_bfo_settings', 'brs_bfo_check_token', ['type' => 'boolean', 'default' => true]);
+
+        add_settings_field(
+            'brs_bfo_check_origin',
+            __('Enable Origin Validation', 'brs-block-fake-orders'),
+            [$this, 'render_checkbox_field'],
+            'brs_bfo_settings',
+            'brs_bfo_section_validation',
+            ['option_name' => 'brs_bfo_check_origin']
+        );
+        register_setting('brs_bfo_settings', 'brs_bfo_check_origin', ['type' => 'boolean', 'default' => true]);
+
+        add_settings_field(
+            'brs_bfo_check_referer',
+            __('Enable Referer Validation', 'brs-block-fake-orders'),
+            [$this, 'render_checkbox_field'],
+            'brs_bfo_settings',
+            'brs_bfo_section_validation',
+            ['option_name' => 'brs_bfo_check_referer']
+        );
+        register_setting('brs_bfo_settings', 'brs_bfo_check_referer', ['type' => 'boolean', 'default' => true]);
+
+        add_settings_field(
+            'brs_bfo_check_session',
+            __('Enable Session Validation', 'brs-block-fake-orders'),
+            [$this, 'render_checkbox_field'],
+            'brs_bfo_settings',
+            'brs_bfo_section_validation',
+            ['option_name' => 'brs_bfo_check_session']
+        );
+        register_setting('brs_bfo_settings', 'brs_bfo_check_session', ['type' => 'boolean', 'default' => true]);
+
+        // Allowed domain
+        $default_domain = parse_url(get_site_url(), PHP_URL_HOST);
+        add_settings_field(
+            'brs_bfo_allowed_domain',
+            __('Allowed Domain', 'brs-block-fake-orders'),
+            [$this, 'render_text_field'],
+            'brs_bfo_settings',
+            'brs_bfo_section_validation',
+            ['option_name' => 'brs_bfo_allowed_domain', 'placeholder' => $default_domain]
+        );
+        register_setting('brs_bfo_settings', 'brs_bfo_allowed_domain', ['type' => 'string', 'default' => $default_domain]);
+
     }
+    
+    public function render_checkbox_field($args) {
+        $value = get_option($args['option_name'], false);
+        echo '<input type="checkbox" name="' . esc_attr($args['option_name']) . '" value="1" ' . checked($value, true, false) . ' />';
+    }
+
+    public function render_text_field($args) {
+        $value = get_option($args['option_name'], $args['placeholder']);
+        echo '<input type="text" class="regular-text" name="' . esc_attr($args['option_name']) . '" value="' . esc_attr($value) . '" placeholder="' . esc_attr($args['placeholder']) . '" />';
+    }
+
 
     public function sanitize_bool($val) {
         return (bool) $val;
