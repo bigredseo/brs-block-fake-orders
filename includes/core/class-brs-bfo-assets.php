@@ -7,15 +7,18 @@ class BRS_BFO_Assets {
     }
 
     public function enqueue_helper_js() {
-        // same behavior as original
         wp_enqueue_script(
             'brs-bfo-helper',
             BRS_BFO_URL . 'assets/js/brs-checkout-helper.js',
             ['wp-hooks'],
-            BRS_BFO_VERSION,
+            null, // no version parameter
             true
         );
-        // Localize/nonce if needed
-        wp_add_inline_script('brs-bfo-helper', 'window.BRS_BFO = { nonce: "'. esc_js( wp_create_nonce('brs_checkout_token') ) .'" };', 'before');
+
+        wp_add_inline_script(
+            'brs-bfo-helper',
+            'window.BRS_BFO = { nonce: "' . esc_js(wp_create_nonce('brs_checkout_token')) . '" };',
+            'before'
+        );
     }
 }

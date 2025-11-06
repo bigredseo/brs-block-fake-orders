@@ -51,44 +51,61 @@ class BRS_BFO_Settings {
             'brs_bfo_settings'
         );
 
-        // Register toggles
+        // Register Toggles: Token validation
         add_settings_field(
             'brs_bfo_check_token',
             __('Enable Token Validation', 'brs-block-fake-orders'),
             [$this, 'render_checkbox_field'],
             'brs_bfo_settings',
             'brs_bfo_section_validation',
-            ['option_name' => 'brs_bfo_check_token']
+            [
+                'option_name' => 'brs_bfo_check_token',
+                'description' => __('Requires a valid checkout security token (nonce) in the request header. Prevents automated or replayed submissions that bypass the WooCommerce checkout form.', 'brs-block-fake-orders')
+
+            ]   
         );
         register_setting('brs_bfo_settings', 'brs_bfo_check_token', ['type' => 'boolean', 'default' => true]);
 
+        // Register Toggles: Origin validation
         add_settings_field(
             'brs_bfo_check_origin',
             __('Enable Origin Validation', 'brs-block-fake-orders'),
             [$this, 'render_checkbox_field'],
             'brs_bfo_settings',
             'brs_bfo_section_validation',
-            ['option_name' => 'brs_bfo_check_origin']
+            [   
+                'option_name' => 'brs_bfo_check_origin',
+                'description' => __('Validates the HTTP Origin header, used mainly by browsers during API or AJAX requests. Ensures that REST or JavaScript requests originate from your own domain.', 'brs-block-fake-orders')
+            ]
         );
         register_setting('brs_bfo_settings', 'brs_bfo_check_origin', ['type' => 'boolean', 'default' => true]);
 
+        // Register Toggles: Referer validation
         add_settings_field(
             'brs_bfo_check_referer',
             __('Enable Referer Validation', 'brs-block-fake-orders'),
             [$this, 'render_checkbox_field'],
             'brs_bfo_settings',
             'brs_bfo_section_validation',
-            ['option_name' => 'brs_bfo_check_referer']
+            [
+                'option_name' => 'brs_bfo_check_referer',
+                'description' => __('Checks the Referer header, which browsers include on normal page and form submissions. Ensures checkout requests come directly from your site’s pages.', 'brs-block-fake-orders')
+                ]
         );
         register_setting('brs_bfo_settings', 'brs_bfo_check_referer', ['type' => 'boolean', 'default' => true]);
 
+        // Register Toggles: Session validation
         add_settings_field(
             'brs_bfo_check_session',
             __('Enable Session Validation', 'brs-block-fake-orders'),
             [$this, 'render_checkbox_field'],
             'brs_bfo_settings',
             'brs_bfo_section_validation',
-            ['option_name' => 'brs_bfo_check_session']
+            [
+                'option_name' => 'brs_bfo_check_session',
+                'description' => __('Requires a valid WooCommerce session cookie to exist before processing an order or API call. Blocks direct requests without a cart or active session.', 'brs-block-fake-orders')
+
+                ]
         );
         register_setting('brs_bfo_settings', 'brs_bfo_check_session', ['type' => 'boolean', 'default' => true]);
 
@@ -108,7 +125,11 @@ class BRS_BFO_Settings {
     
     public function render_checkbox_field($args) {
         $value = get_option($args['option_name'], false);
-        echo '<input type="checkbox" name="' . esc_attr($args['option_name']) . '" value="1" ' . checked($value, true, false) . ' />';
+        echo '<label><input type="checkbox" name="' . esc_attr($args['option_name']) . '" value="1" ' . checked($value, true, false) . ' />';
+        echo ' ' . esc_html__('Enabled', 'brs-block-fake-orders') . '</label>';
+        if (!empty($args['description'])) {
+            echo '<p class="description">' . esc_html($args['description']) . '</p>';
+        }
     }
 
     public function render_text_field($args) {

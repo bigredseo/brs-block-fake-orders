@@ -2,6 +2,22 @@
 All notable changes to **BRS Block Fake Orders** will be documented in this file.
 ---
 
+## [0.1.7.1] - 2025-11-05
+### Added
+- Add explanations for the validation toggles
+
+### Removed
+- Removed version dependency in brs-bfo-helper files
+
+### Fixed
+- Replaced `WP_Error` returns with proper `WP_REST_Response` objects in REST API blocking logic to prevent Store API fatal errors.
+- Ensured REST blocking returns consistent JSON 403 responses instead of causing REST dispatch crashes.
+
+### Changed
+- Improved REST validation behavior to align with WordPress REST API expectations.
+
+---
+
 ## [0.1.7] - 2025-11-05
 ### Added
 - New **Validation Settings** section in the admin panel with toggles for token, origin, referer, and session checks.
